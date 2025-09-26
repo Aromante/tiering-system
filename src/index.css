@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-top: 255 255 255;
+  --bg-bottom: 252 250 245; /* beige cálido */
+  --primary: 251 191 36; /* amarillo suave (amber-400 aprox) */
+  --primary-600: 217 119 6; /* amber-700 aprox */
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  @apply text-gray-900 antialiased bg-white;
+  font-family: ui-rounded, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+.container { @apply px-6 mx-auto; }
+
+/* Cards: esquinas grandes, glassy y sombras suaves */
+.card-soft {
+  background: linear-gradient(180deg, rgba(255,255,255,0.85) 0%, rgba(253,253,253,0.75) 100%);
+  backdrop-filter: saturate(140%) blur(6px);
+  @apply rounded-2xl shadow-[0_10px_30px_-15px_rgba(0,0,0,0.15)] border border-white/60;
+}
+
+/* Botones pill y estados sutiles */
+.btn-pill { @apply rounded-full; }
+
+/* Chips (filtros) */
+.chip {
+  @apply inline-flex items-center rounded-full px-3 py-1 text-xs text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors;
+}
+
+/* Tabla moderna */
+.table-modern thead th { @apply text-[9px] md:text-[10px] uppercase tracking-wide text-gray-700; }
+.table-modern tbody tr { @apply transition-colors; }
+.table-modern tbody td { @apply border-b border-gray-100; }
+.table-modern td { @apply py-5; line-height: 1.6; }
+
+/* Hover sutil por renglón con bordes redondeados y sombra suave */
+.table-modern tbody tr.row-hover:hover { filter: drop-shadow(0 10px 20px rgba(0,0,0,0.06)); }
+.table-modern tbody tr.row-hover:hover td { @apply bg-white; }
+.table-modern tbody tr.row-hover:hover td:first-child { @apply rounded-l-xl; }
+.table-modern tbody tr.row-hover:hover td:last-child { @apply rounded-r-xl; }
+
+/* Atenuar otros renglones al pasar el mouse por el cuerpo de la tabla */
+.table-modern tbody:hover tr { opacity: 0.9; }
+.table-modern tbody tr:hover { opacity: 1; }
+
+/* Badges suaves */
+.badge-soft { @apply rounded-full px-2.5 py-0.5 text-xs font-medium ring-1; }
+
+/* Micro animaciones */
+.soft-hover { @apply transition-shadow; }
+.soft-hover:hover { @apply shadow-[0_12px_28px_-18px_rgba(0,0,0,0.25)]; }
