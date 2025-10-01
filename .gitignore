@@ -3,3 +3,8 @@ dist/
 
 backend/node_modules/
 backend/.cache/
+
+# Env files and logs (protect secrets)
+.env
+backend/.env
+.backend.log

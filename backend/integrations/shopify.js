@@ -13,6 +13,7 @@ function requiredEnv() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 async function shopifyGraphQL(query, variables) {
+  const DEBUG = String(process.env.TIERS_DEBUG || process.env.DEBUG_SHOPIFY || '').toLowerCase() === 'true'
   if (!requiredEnv()) throw new Error('Shopify env not configured')
   const url = `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/graphql.json`
   const maxAttempts = Math.max(1, Number(process.env.SHOPIFY_GQL_RETRY_MAX || '6'))
@@ -32,6 +33,10 @@ async function shopifyGraphQL(query, variables) {
       const errs = Array.isArray(data?.errors) ? data.errors : []
       const hasThrottleError = errs.some(e => (e?.extensions?.code === 'THROTTLED') || /throttled/i.test(String(e?.message || '')))
       if (!res.ok || errs.length) {
+        if (DEBUG) {
+          const snippet = text ? text.slice(0, 400) : ''
+          console.error('[shopify] HTTP', res.status, 'attempt', attempt, 'errors:', JSON.stringify(errs).slice(0,400), 'body:', snippet)
+        }
         if (isThrottledHttp || hasThrottleError) {
           const jitter = Math.floor(Math.random() * 200)
           const waitMs = Math.min(8000, Math.round(baseDelay * Math.pow(2, attempt - 1)) + jitter)
@@ -45,6 +50,9 @@ async function shopifyGraphQL(query, variables) {
       if (interDelay) await sleep(interDelay)
       return data
     } catch (e) { lastErr = e; const jitter = Math.floor(Math.random() * 200); const waitMs = Math.min(8000, Math.round(baseDelay * Math.pow(2, attempt - 1)) + jitter); await sleep(waitMs) }
+  }
+  if (DEBUG && lastErr) {
+    console.error('[shopify] failed after retries:', String(lastErr?.message || lastErr))
   }
   throw (lastErr || new Error('Shopify GraphQL failed after retries'))
 }

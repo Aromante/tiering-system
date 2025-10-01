@@ -214,6 +214,7 @@ router.get('/api/tiers/summary', async (req, res) => {
   }
   const fromISO = w.fromISO
   const toISO = w.toISO
+  const lite = ['1','true','yes','on'].includes(String(req.query.lite || '').toLowerCase())
   const nocache = String(req.query.nocache || '').toLowerCase() === 'true' || String(req.query.cache || '') === '0'
   const deltaBase = (() => { const s = String(req.query.deltaBase || process.env.TIERS_DELTA_BASE_POLICY || 'anchor_start').trim().toLowerCase(); return (s === 'anchor_end') ? 'anchor_end' : 'anchor_start' })()
   const qpNet = String(req.query.net || req.query.netOfReturns || '').toLowerCase()
@@ -224,7 +225,7 @@ router.get('/api/tiers/summary', async (req, res) => {
   const timeField = (() => { const tf = String(req.query.timeField || '').trim().toLowerCase(); if (tf === 'created_at' || tf === 'processed_at') return tf; const env = String(process.env.TIERS_ORDER_TIME_FIELD || 'processed_at').trim().toLowerCase(); return env === 'processed_at' ? 'processed_at' : 'created_at' })()
   const baseRows = await getSummaryBaseRows(String(channel), fromISO, toISO, { nocache, netOfReturns, byRefundDate, timeField })
   let channelsMeta = null
-  if (String(channel).toUpperCase() === 'TOTAL') {
+  if (!lite && String(channel).toUpperCase() === 'TOTAL') {
     try {
       const online = await getSummaryBaseRows('ONLINE', fromISO, toISO, { nocache, netOfReturns, byRefundDate, timeField })
       const pos = await getSummaryBaseRows('POS', fromISO, toISO, { nocache, netOfReturns, byRefundDate, timeField })
@@ -236,22 +237,24 @@ router.get('/api/tiers/summary', async (req, res) => {
   const rankMap = new Map(); for (let i = 0; i < baseRows.length; i++) rankMap.set(baseRows[i].productId, i + 1)
   let prevMap = new Map()
   try {
-    const msPerDay = 24 * 3600 * 1000
-    const monthMode = !!monthSel
-    const { prevFrom, prevTo } = (() => {
-      if (monthMode) return computePrevMonthWindow(fromISO)
-      const lenDays = (() => {
-        if (!(from && to)) return Number(cfg.salesWindowDays || 35)
-        const dtFrom = Date.parse(fromISO); const dtTo = Date.parse(toISO)
-        if (Number.isFinite(dtFrom) && Number.isFinite(dtTo) && dtTo >= dtFrom) return Math.max(1, Math.floor((dtTo - dtFrom) / msPerDay) + 1)
-        return Number(cfg.salesWindowDays || 35)
+    if (!lite) {
+      const msPerDay = 24 * 3600 * 1000
+      const monthMode = !!monthSel
+      const { prevFrom, prevTo } = (() => {
+        if (monthMode) return computePrevMonthWindow(fromISO)
+        const lenDays = (() => {
+          if (!(from && to)) return Number(cfg.salesWindowDays || 35)
+          const dtFrom = Date.parse(fromISO); const dtTo = Date.parse(toISO)
+          if (Number.isFinite(dtFrom) && Number.isFinite(dtTo) && dtTo >= dtFrom) return Math.max(1, Math.floor((dtTo - dtFrom) / msPerDay) + 1)
+          return Number(cfg.salesWindowDays || 35)
+        })()
+        if (deltaBase === 'anchor_end') return shiftIsoWindowDays(fromISO, toISO, lenDays)
+        try { const tzName = String(process.env.TIERS_TZ || '').trim(); if (tzName && typeof utcToZonedTime === 'function' && typeof zonedTimeToUtc === 'function') { const f = new Date(fromISO); const fLoc = utcToZonedTime(f, tzName); const prevToLoc = new Date(fLoc.getFullYear(), fLoc.getMonth(), fLoc.getDate(), fLoc.getHours(), fLoc.getMinutes(), fLoc.getSeconds(), Math.max(0, fLoc.getMilliseconds() - 1)); const prevFromLoc = new Date(prevToLoc.getFullYear(), prevToLoc.getMonth(), prevToLoc.getDate() - (lenDays - 1), prevToLoc.getHours(), prevToLoc.getMinutes(), prevToLoc.getSeconds(), prevToLoc.getMilliseconds()); const pF = zonedTimeToUtc(prevFromLoc, tzName).toISOString(); const pT = zonedTimeToUtc(prevToLoc, tzName).toISOString(); return { prevFrom: pF, prevTo: pT } } } catch {}
+        const fromMs = Date.parse(fromISO); const prevToMs = fromMs - 1; const prevFromMs = prevToMs - (lenDays * msPerDay) + 1; return { prevFrom: new Date(prevFromMs).toISOString(), prevTo: new Date(prevToMs).toISOString() }
       })()
-      if (deltaBase === 'anchor_end') return shiftIsoWindowDays(fromISO, toISO, lenDays)
-      try { const tzName = String(process.env.TIERS_TZ || '').trim(); if (tzName && typeof utcToZonedTime === 'function' && typeof zonedTimeToUtc === 'function') { const f = new Date(fromISO); const fLoc = utcToZonedTime(f, tzName); const prevToLoc = new Date(fLoc.getFullYear(), fLoc.getMonth(), fLoc.getDate(), fLoc.getHours(), fLoc.getMinutes(), fLoc.getSeconds(), Math.max(0, fLoc.getMilliseconds() - 1)); const prevFromLoc = new Date(prevToLoc.getFullYear(), prevToLoc.getMonth(), prevToLoc.getDate() - (lenDays - 1), prevToLoc.getHours(), prevToLoc.getMinutes(), prevToLoc.getSeconds(), prevToLoc.getMilliseconds()); const pF = zonedTimeToUtc(prevFromLoc, tzName).toISOString(); const pT = zonedTimeToUtc(prevToLoc, tzName).toISOString(); return { prevFrom: pF, prevTo: pT } } } catch {}
-      const fromMs = Date.parse(fromISO); const prevToMs = fromMs - 1; const prevFromMs = prevToMs - (lenDays * msPerDay) + 1; return { prevFrom: new Date(prevFromMs).toISOString(), prevTo: new Date(prevToMs).toISOString() }
-    })()
-    const prevRows = await getSummaryBaseRows(String(channel), prevFrom, prevTo, { nocache, netOfReturns, byRefundDate, timeField })
-    prevMap = new Map(prevRows.map(r => [r.productId, Number(r.sharePct || 0)]))
+      const prevRows = await getSummaryBaseRows(String(channel), prevFrom, prevTo, { nocache, netOfReturns, byRefundDate, timeField })
+      prevMap = new Map(prevRows.map(r => [r.productId, Number(r.sharePct || 0)]))
+    }
   } catch {}
 
   let list = baseRows
@@ -261,7 +264,13 @@ router.get('/api/tiers/summary', async (req, res) => {
   const ps = Math.max(parseInt(pageSize, 10) || 50, 1)
   const start = (p - 1) * ps
   const end = start + ps
-  const withMeta = list.map(r => ({ ...r, rank: rankMap.get(r.productId) || null, deltaSharePct: Number((Number(r.sharePct || 0) - (prevMap.get(r.productId) || 0)).toFixed(4)) }))
+  const withMeta = list.map(r => ({
+    ...r,
+    rank: rankMap.get(r.productId) || null,
+    deltaSharePct: (lite
+      ? 0
+      : Number((Number(r.sharePct || 0) - (prevMap.get(r.productId) || 0)).toFixed(4)))
+  }))
   const cfgNow = await readConfig().catch(() => ({ configVersion: 1 }))
   const pageRows = withMeta.slice(start, end)
   const payload = { rows: pageRows, total: withMeta.length, page: p, pageSize: ps, configVersion: cfgNow.configVersion || 1, window: { fromISO, toISO }, meta: { channels: channelsMeta } }
@@ -297,6 +306,7 @@ router.get('/api/tiers/summary', async (req, res) => {
     res.setHeader('X-Window-From', fromISO)
     res.setHeader('X-Window-To', toISO)
     res.setHeader('Cache-Control', `public, max-age=${cacheS}`)
+    if (lite) res.setHeader('X-Lite', 'true')
     res.setHeader('X-Net-Of-Returns', String(netOfReturns))
     res.setHeader('X-By-Refund-Date', String(byRefundDate))
     res.setHeader('X-Time-Field', String(timeField))

@@ -24,12 +24,14 @@ export default function TiersDashboard() {
   // helpers para comparativa removidos
 
   const apiBase = (import.meta as any).env?.VITE_API_BASE || ''
+  // Carga inicial rápida (lite)
   const baseQuery = useQuery({
     queryKey: ['tiersSummary'],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ channel: 'TOTAL' })
+      params.set('lite', '1')
       const url = `${apiBase}/api/tiers/summary?${params.toString()}`
-      const res = await fetch(url, { headers: { 'Cache-Control': 'max-age=60' } })
+      const res = await fetch(url, { signal, cache: 'no-store', headers: { 'Cache-Control': 'no-store' } })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
       return data as { rows: any[], total: number, page: number, pageSize: number }
@@ -38,17 +40,34 @@ export default function TiersDashboard() {
     gcTime: 5 * 60_000,
     refetchOnMount: 'always',
     refetchOnReconnect: 'always',
-    refetchOnWindowFocus: 'always',
+    refetchOnWindowFocus: false,
+  })
+
+  // Fetch en segundo plano (completo) para TOTAL
+  const fullQuery = useQuery({
+    queryKey: ['tiersSummaryFull'],
+    enabled: !!baseQuery.data && channel === 'TOTAL',
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ channel: 'TOTAL' })
+      const url = `${apiBase}/api/tiers/summary?${params.toString()}`
+      const res = await fetch(url, { signal, cache: 'no-store', headers: { 'Cache-Control': 'no-store' } })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      return data as { rows: any[], total: number, page: number, pageSize: number, meta?: any }
+    },
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   })
 
   // Fallback channel query if server doesn't provide per-channel meta
   const chQuery = useQuery({
     queryKey: ['tiersSummaryCh', channel],
     enabled: channel !== 'TOTAL' && !((baseQuery.data as any)?.meta?.channels?.[channel]),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ channel })
       const url = `${apiBase}/api/tiers/summary?${params.toString()}`
-      const res = await fetch(url, { headers: { 'Cache-Control': 'max-age=60' } })
+      const res = await fetch(url, { signal, cache: 'no-store', headers: { 'Cache-Control': 'no-store' } })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
       return data as { rows: any[], total: number, page: number, pageSize: number }
@@ -58,14 +77,17 @@ export default function TiersDashboard() {
   })
 
   // Rank by participation (sharePct) descending for numbering column (#)
+  // Datos a renderizar para TOTAL: primero lite, luego full cuando esté
+  const totalData = (channel === 'TOTAL') ? (fullQuery.data || baseQuery.data) : null
+
   const baseRankByShare = React.useMemo(() => {
     // Rank is based on the complete table (not filtered by search)
-    const rows = (baseQuery.data?.rows || [])
+    const rows = (totalData?.rows || [])
     const sorted = rows.slice().sort((a:any,b:any)=> Number(b.sharePct||0) - Number(a.sharePct||0))
     const map: Record<string, number> = {}
     sorted.forEach((r:any, idx:number) => { if (r?.productId) map[r.productId] = idx + 1 })
     return map
-  }, [baseQuery.data?.rows])
+  }, [totalData?.rows])
 
   function sortIcon(col: typeof sort.key) {
     const active = sort.key === col
@@ -108,6 +130,12 @@ export default function TiersDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Link to="/settings"><Button data-variant="outline" data-size="sm" className="gap-2 btn-pill"><Settings className="h-4 w-4" /> Ajustes</Button></Link>
+          {/* Indicador de versión de tabla */}
+          {channel === 'TOTAL' && (
+            <Badge className="px-3 py-1" data-variant={fullQuery.data ? 'green' : 'gray'}>
+              {fullQuery.data ? 'Completa' : 'Lite'}
+            </Badge>
+          )}
         </div>
       </header>
 
@@ -137,17 +165,17 @@ export default function TiersDashboard() {
       </div>
 
       {/* Overlay de actualización ligera cuando hay refetch en curso */}
-      {baseQuery.isFetching && (
+      {(baseQuery.isFetching || chQuery.isFetching || fullQuery.isFetching) && (
         <div className="fixed top-3 right-4 z-40 bg-white/90 border rounded-full px-3 py-1 text-xs text-gray-600 shadow-sm flex items-center gap-2">
           <Spinner size="sm" />
-          <span>Actualizando datos…</span>
+          <span>Actualizando datos… {channel==='TOTAL' ? (fullQuery.isFetching ? '(Completa)' : '(Lite)') : ''}</span>
         </div>
       )}
 
       <section>
         {baseQuery.isLoading && <Spinner label="Cargando…" />}
-        {baseQuery.error && <p className="text-sm text-red-600">{(baseQuery.error as any).message}</p>}
-        {baseQuery.data && (
+        {(baseQuery.error || fullQuery.error) && <p className="text-sm text-red-600">{((baseQuery.error||fullQuery.error) as any).message}</p>}
+        {totalData && (
           <div className="overflow-x-auto rounded-xl">
             <table className="w-full text-sm table-modern">
               <thead className="bg-gray-100">
@@ -164,12 +192,12 @@ export default function TiersDashboard() {
               </thead>
               <tbody>
                 {(() => {
-                  const totalRows = (baseQuery.data?.rows || [])
+                  const totalRows = (totalData?.rows || [])
                   if (channel === 'TOTAL') {
                     const filtered = applySort(totalRows
                       .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
                       .filter((r:any)=> !search || normalizeText(String(r.name||'')).includes(normalizeText(search)))
-                    )
+                  )
                     if (filtered.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</td></tr>)
                     return filtered.map((r:any, i:number) => (
                       <tr key={i} className={"border-b border-gray-100 row-hover"}>
