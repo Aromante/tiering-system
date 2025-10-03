@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": { "node": ">=20" },
   "scripts": {
     "predev": "npm run install:backend",
     "dev": "concurrently -k -n backend,frontend \"npm --prefix backend run dev\" \"npm run dev:frontend\"",
