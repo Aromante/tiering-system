@@ -4,7 +4,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import TiersDashboard from "./pages/dashboards/tiers/index";
-import TiersSettingsPage from "./pages/dashboards/tiers/settings";
 
 const queryClient = new QueryClient();
 
@@ -14,10 +13,8 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<TiersDashboard />} />
-          <Route path="/settings" element={<TiersSettingsPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>
 );
-

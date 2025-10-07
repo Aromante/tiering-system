@@ -1,6 +1,6 @@
 const path = require('path')
 const fsp = require('fs/promises')
-const { fetchSales } = require('../integrations/shopify')
+const { fetchSales } = require('../integrations/provider')
 
 const CACHE_DIR = path.join(__dirname, '..', '..', '.cache')
 function ensureDir(p) { require('fs').existsSync(p) || require('fs').mkdirSync(p, { recursive: true }) }
@@ -34,4 +34,3 @@ async function fetchAggregatedSales(channel, fromISO, toISO, opts = {}) {
 }
 
 module.exports = { fetchAggregatedSales }
-

@@ -9,7 +9,7 @@ try {
 } catch {}
 const { readConfig, writeConfig } = require('./configStore')
 const { computeTierAssignments } = require('./compute')
-const { fetchSales, fetchSkuSummary, auditSku, auditProductById } = require('../integrations/shopify')
+const { fetchSales, fetchSkuSummary, auditSku, auditProductById } = require('../integrations/provider')
 const { fetchAggregatedSales } = require('./monthlyCache')
 const router = express.Router()
 const REMOTE_BASE = process.env.TIERS_REMOTE_BASE || ''
@@ -109,8 +109,21 @@ function computePrevMonthWindow(fromISO) {
 
 async function getSummaryBaseRows(channel, fromISO, toISO, opts = {}) {
   const sales = await fetchAggregatedSales(channel, fromISO, toISO, opts)
-  const sumRev = sales.reduce((a,b)=> a + (Number(b.revenue||0)), 0) || 1
-  const withShare = sales.map(r => ({ ...r, sharePct: (Number(r.revenue||0)*100)/sumRev }))
+  const hasProvidedShare = sales.some(r => r.sharePct != null && Number.isFinite(Number(r.sharePct)))
+  let withShare = sales
+  if (!hasProvidedShare) {
+    const sumRev = sales.reduce((a,b)=> a + (Number(b.revenue||0)), 0)
+    if (sumRev > 0) {
+      withShare = sales.map(r => ({ ...r, sharePct: (Number(r.revenue||0)*100)/sumRev }))
+    } else {
+      const sumQty = sales.reduce((a,b)=> a + (Number(b.qty30||0) + Number(b.qty100||0)), 0) || 1
+      withShare = sales.map(r => ({ ...r, sharePct: ((Number(r.qty30||0)+Number(r.qty100||0)) * 100)/sumQty }))
+    }
+  }
+  const hasTier = sales.some(r => r.tier)
+  if (hasTier) {
+    return withShare.map(r => ({ ...r, tier: r.tier }))
+  }
   const cfg = await readConfig()
   const assign = computeTierAssignments(withShare, cfg)
   const tierMap = new Map(assign.map(a => [a.productId, a.tier]))

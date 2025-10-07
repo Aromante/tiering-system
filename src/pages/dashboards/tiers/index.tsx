@@ -1,13 +1,13 @@
 import React from 'react'
-import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 // Card UI removido al quitar comparativa
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Button } from '@/components/ui/button'
 // Filtros comparativos removidos
 import { Badge } from '@/components/ui/badge'
 import { normalizeText } from '@/lib/utils'
-import { BarChart3, Settings, ChevronUp, ChevronDown } from 'lucide-react'
+import { BarChart3, ChevronUp, ChevronDown, Settings as SettingsIcon } from 'lucide-react'
 import Spinner from '@/components/ui/spinner'
 
 export default function TiersDashboard() {
@@ -23,17 +23,31 @@ export default function TiersDashboard() {
 
   // helpers para comparativa removidos
 
-  const apiBase = (import.meta as any).env?.VITE_API_BASE || ''
+  async function fetchChannelRows(ch: 'TOTAL'|'ONLINE'|'POS') {
+    const prefix = ((import.meta as any).env?.VITE_SKU_PREFIX || 'PER-') as string
+    const table = ch === 'POS' ? 'tiering_pos' : (ch === 'ONLINE' ? 'tiering_online' : 'tiering_global')
+    const { data, error } = await supabase
+      .from(table)
+      .select('product_title, participation_pct, tier, three_weeks_units, three_weeks_30ml, three_weeks_100ml, revenue_gross, rank')
+    if (error) throw error
+    const rows = (data || []).map((r: any) => {
+      // No hay SKU en las vistas: usamos product_title como id estable para UI
+      const baseId = String(r.product_title || '').trim()
+      const name = String(r.product_title || baseId)
+      const qty30 = Number(r.three_weeks_30ml ?? 0)
+      const qty100 = Number(r.three_weeks_100ml ?? 0)
+      const revenue = Number(r.revenue_gross || 0)
+      const sharePct = r.participation_pct != null ? Number(r.participation_pct) : 0
+      const tier = r.tier ? String(r.tier) : undefined
+      const rank = r.rank != null ? Number(r.rank) : undefined
+      return { productId: baseId, name, qty30, qty100, revenue, sharePct, tier, rank }
+    })
+    return { rows, total: rows.length, page: 1, pageSize: rows.length }
+  }
+
   const baseQuery = useQuery({
-    queryKey: ['tiersSummary'],
-    queryFn: async () => {
-      const params = new URLSearchParams({ channel: 'TOTAL' })
-      const url = `${apiBase}/api/tiers/summary?${params.toString()}`
-      const res = await fetch(url, { headers: { 'Cache-Control': 'max-age=60' } })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
-      return data as { rows: any[], total: number, page: number, pageSize: number }
-    },
+    queryKey: ['tiersSummary','TOTAL'],
+    queryFn: () => fetchChannelRows('TOTAL'),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     refetchOnMount: 'always',
@@ -44,15 +58,8 @@ export default function TiersDashboard() {
   // Fallback channel query if server doesn't provide per-channel meta
   const chQuery = useQuery({
     queryKey: ['tiersSummaryCh', channel],
-    enabled: channel !== 'TOTAL' && !((baseQuery.data as any)?.meta?.channels?.[channel]),
-    queryFn: async () => {
-      const params = new URLSearchParams({ channel })
-      const url = `${apiBase}/api/tiers/summary?${params.toString()}`
-      const res = await fetch(url, { headers: { 'Cache-Control': 'max-age=60' } })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
-      return data as { rows: any[], total: number, page: number, pageSize: number }
-    },
+    enabled: channel !== 'TOTAL',
+    queryFn: () => fetchChannelRows(channel),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
   })
@@ -106,9 +113,7 @@ export default function TiersDashboard() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><BarChart3 className="h-5 w-5 text-blue-600" /> Tiers — Resumen</h1>
           <p className="text-sm text-gray-500">Vista dinámica por canal, ordenada por ingresos. El # refleja la participación.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link to="/settings"><Button data-variant="outline" data-size="sm" className="gap-2 btn-pill"><Settings className="h-4 w-4" /> Ajustes</Button></Link>
-        </div>
+        <SettingsInline />
       </header>
 
       {/* Búsqueda + botón de filtros (bajo el título, sobre la tabla) */}
@@ -185,16 +190,11 @@ export default function TiersDashboard() {
                     ))
                   }
                   const ch = channel
-                  const meta = (baseQuery.data as any)?.meta?.channels || {}
-                  let list:any[] = Array.isArray(meta?.[ch]) ? meta[ch] : []
-                  if (!list || list.length === 0) {
-                    if (chQuery.isLoading) {
-                      return (<tr><td colSpan={8} className="py-8 text-center"><Spinner label="Cargando canal…" /></td></tr>)
-                    }
-                    if (chQuery.data?.rows) {
-                      list = chQuery.data.rows.map((r:any)=> ({ productId: r.productId, name: r.name, qty30: r.qty30||0, qty100: r.qty100||0, revenue: Number(r.revenue||0) }))
-                    }
-                  }
+                  let list:any[] = []
+                  if (ch === 'TOTAL') list = (baseQuery.data?.rows || [])
+                  else if (chQuery.isLoading) {
+                    return (<tr><td colSpan={8} className="py-8 text-center"><Spinner label="Cargando canal…" /></td></tr>)
+                  } else if (chQuery.data?.rows) list = chQuery.data.rows
                   const tierById: Record<string,string> = {}
                   for (const r of totalRows) if (r?.productId) tierById[r.productId] = r.tier
                   const sumRev = list.reduce((a,b)=> a + Number(b.revenue||0), 0) || 1
@@ -205,9 +205,9 @@ export default function TiersDashboard() {
                     qty100: r.qty100||0,
                     revenue: Number(r.revenue||0),
                     totalSales: 0,
-                    sharePct: (Number(r.revenue||0)*100)/sumRev,
+                    sharePct: Number.isFinite(Number(r.sharePct)) ? Number(r.sharePct) : (Number(r.revenue||0)*100)/sumRev,
                     deltaSharePct: 0,
-                    tier: tierById[r.productId] || 'C',
+                    tier: r.tier || tierById[r.productId] || 'C',
                   }))
                   const filtered = applySort(rows
                     .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
@@ -238,5 +238,75 @@ export default function TiersDashboard() {
 
       {/* Se removió la sección de comparativa inferior */}
     </main>
+  )
+}
+
+function SettingsInline() {
+  const [open, setOpen] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+  const btnRef = React.useRef<HTMLButtonElement | null>(null)
+
+  const settingsQuery = useQuery({
+    queryKey: ['forecasting_settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('forecasting_settings').select('id,tier_weeks').eq('id', 1).maybeSingle()
+      if (error) throw error
+      return data || null
+    },
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  })
+
+  const currentWeeks = Number(settingsQuery.data?.tier_weeks ?? 3)
+
+  async function setWeeks(w: 1|2|3|4) {
+    try {
+      setSaving(true)
+      const { error } = await supabase.rpc('set_tier_weeks', { new_tier: w })
+      if (error) throw error
+      await settingsQuery.refetch()
+      setOpen(false)
+    } catch (e) {
+      alert((e as any)?.message || 'No se pudo guardar')
+    } finally { setSaving(false) }
+  }
+
+  // Close menu on outside click
+  React.useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!open) return
+      const btn = btnRef.current
+      if (!btn) return
+      const tgt = e.target as Node
+      if (btn.contains(tgt)) return
+      const panel = document.getElementById('settings-popover')
+      if (panel && panel.contains(tgt)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  return (
+    <div className="relative">
+      <Button ref={btnRef as any} onClick={()=> setOpen(v=>!v)} data-variant="outline" data-size="sm" className="gap-2 btn-pill">
+        <SettingsIcon className="h-4 w-4" />
+        <span>Semanas: {currentWeeks}</span>
+      </Button>
+      {open && (
+        <div id="settings-popover" className="absolute right-0 mt-2 z-50 rounded-lg border bg-white shadow-md p-3 min-w-[220px]">
+          <div className="text-xs text-gray-500 mb-2">Selecciona semanas a considerar</div>
+          <div className="flex items-center gap-2">
+            {[1,2,3,4].map(v => (
+              <Button key={v} onClick={()=> setWeeks(v as 1|2|3|4)} disabled={saving} data-size="sm" data-variant={currentWeeks===v? 'default':'outline'}>
+                {v}
+              </Button>
+            ))}
+          </div>
+          {saving && <div className="text-xs text-gray-500 mt-2">Guardando…</div>}
+        </div>
+      )}
+    </div>
   )
 }

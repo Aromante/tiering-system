@@ -4,9 +4,9 @@
   "tierAPct": 1.5,
   "tiersTopCount": 30,
   "tempTierWeeks": 12,
-  "salesWindowDays": 30,
+  "salesWindowDays": 21,
   "useCompletedDays": false,
   "recalcFrequencyDays": 14,
   "graceMonthsC": 12,
-  "configVersion": 9
+  "configVersion": 10
 }
