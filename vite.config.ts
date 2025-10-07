@@ -4,15 +4,10 @@ import path from "path";
 
 export default defineConfig({
   server: {
-    host: "::",
+    // Use localhost for wider Windows compatibility; IPv6 "::" can cause issues in some setups
+    host: "localhost",
     port: 8086,
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:5006",
-        changeOrigin: true,
-        secure: false
-      }
-    }
+    strictPort: false,
   },
   plugins: [react()],
   resolve: {
