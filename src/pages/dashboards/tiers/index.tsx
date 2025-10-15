@@ -18,6 +18,20 @@ export default function TiersDashboard() {
   const [search, setSearch] = React.useState('')
   // Barra de filtros siempre visible (sin toggle)
   const [sort, setSort] = React.useState<{ key: 'rank'|'tier'|'name'|'qty30'|'qty100'|'revenue'|'sharePct'|'deltaSharePct', dir: 'asc'|'desc' }>({ key: 'revenue', dir: 'desc' })
+  // Visibilidad de columnas (persistencia local por ahora)
+  const [showRevenue, setShowRevenue] = React.useState<boolean>(false)
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem('tiers-cols-v1')
+      if (raw) {
+        const saved = JSON.parse(raw)
+        setShowRevenue(Boolean(saved.showRevenue))
+      }
+    } catch {}
+  }, [])
+  React.useEffect(() => {
+    try { localStorage.setItem('tiers-cols-v1', JSON.stringify({ showRevenue })) } catch {}
+  }, [showRevenue])
 
   // Se removió la ventana comparativa
 
@@ -113,7 +127,7 @@ export default function TiersDashboard() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><BarChart3 className="h-5 w-5 text-blue-600" /> Tiers — Resumen</h1>
           <p className="text-sm text-gray-500">Vista dinámica por canal, ordenada por ingresos. El # refleja la participación.</p>
         </div>
-        <SettingsInline />
+        <SettingsInline showRevenue={showRevenue} setShowRevenue={setShowRevenue} />
       </header>
 
       {/* Búsqueda + botón de filtros (bajo el título, sobre la tabla) */}
@@ -162,7 +176,9 @@ export default function TiersDashboard() {
                   <th className="py-4 pr-2 first:rounded-l-xl last:rounded-r-xl"><button className="flex items-center gap-1" onClick={()=> toggleSort('name')}>PRODUCTO {sortIcon('name')}</button></th>
                   <th className="py-4 text-center first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-center gap-1" onClick={()=> toggleSort('qty30')}>30ML {sortIcon('qty30')}</button></th>
                   <th className="py-4 text-center first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-center gap-1" onClick={()=> toggleSort('qty100')}>100ML {sortIcon('qty100')}</button></th>
-                  <th className="py-4 text-center first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-center gap-1" onClick={()=> toggleSort('revenue')}>NET SALES {sortIcon('revenue')}</button></th>
+                  {showRevenue && (
+                    <th className="py-4 text-center first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-center gap-1" onClick={()=> toggleSort('revenue')}>NET SALES {sortIcon('revenue')}</button></th>
+                  )}
                   <th className="py-4 text-right pr-8 first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-end gap-1" onClick={()=> toggleSort('sharePct')}>% {sortIcon('sharePct')}</button></th>
                   <th className="py-4 text-right pr-8 first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-end gap-1" onClick={()=> toggleSort('deltaSharePct')}>DELTA {sortIcon('deltaSharePct')}</button></th>
                 </tr>
@@ -175,7 +191,8 @@ export default function TiersDashboard() {
                       .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
                       .filter((r:any)=> !search || normalizeText(String(r.name||'')).includes(normalizeText(search)))
                     )
-                    if (filtered.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</td></tr>)
+                    const colSpanTotal = 7 + (showRevenue ? 1 : 0)
+                    if (filtered.length === 0) return (<tr><td colSpan={colSpanTotal} className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</td></tr>)
                     return filtered.map((r:any, i:number) => (
                       <tr key={i} className={"border-b border-gray-100 row-hover"}>
                         <td className="py-5 px-3 tabular-nums text-center tracking-tight text-[13px]">{(r.productId && baseRankByShare[r.productId]) || r.rank || i+1}</td>
@@ -183,7 +200,9 @@ export default function TiersDashboard() {
                         <td className="py-5 pr-4 whitespace-nowrap font-medium tracking-tight text-[13px]">{r.name}</td>
                         <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{Number(r.qty30||0).toLocaleString()}</td>
                         <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{Number(r.qty100||0).toLocaleString()}</td>
-                        <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{fmtRevenue(r.revenue)}</td>
+                        {showRevenue && (
+                          <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{fmtRevenue(r.revenue)}</td>
+                        )}
                         <td className="py-5 tabular-nums text-right pr-8 tracking-tight text-[13px]">{fmtPct(r.sharePct)}</td>
                         <td className={`py-5 tabular-nums text-right pr-8 tracking-tight text-[13px] ${Number(r.deltaSharePct||0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{fmtPct(r.deltaSharePct)}</td>
                       </tr>
@@ -193,7 +212,8 @@ export default function TiersDashboard() {
                   let list:any[] = []
                   if (ch === 'TOTAL') list = (baseQuery.data?.rows || [])
                   else if (chQuery.isLoading) {
-                    return (<tr><td colSpan={8} className="py-8 text-center"><Spinner label="Cargando canal…" /></td></tr>)
+                    const colSpanCh = 7 + (showRevenue ? 1 : 0)
+                    return (<tr><td colSpan={colSpanCh} className="py-8 text-center"><Spinner label="Cargando canal…" /></td></tr>)
                   } else if (chQuery.data?.rows) list = chQuery.data.rows
                   const tierById: Record<string,string> = {}
                   for (const r of totalRows) if (r?.productId) tierById[r.productId] = r.tier
@@ -213,7 +233,8 @@ export default function TiersDashboard() {
                     .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
                     .filter((r:any)=> !search || normalizeText(String(r.name||'')).includes(normalizeText(search)))
                   )
-                  if (filtered.length === 0) return (<tr><td colSpan={8} className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</td></tr>)
+                  const colSpanChEmpty = 7 + (showRevenue ? 1 : 0)
+                  if (filtered.length === 0) return (<tr><td colSpan={colSpanChEmpty} className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</td></tr>)
                   const sorted = rows.slice().sort((a,b)=> Number(b.sharePct)-Number(a.sharePct))
                   const rankMap: Record<string, number> = {}
                   sorted.forEach((r:any, idx:number)=> { if (r.productId) rankMap[r.productId] = idx+1 })
@@ -224,7 +245,9 @@ export default function TiersDashboard() {
                       <td className="py-5 pr-4 whitespace-nowrap font-medium tracking-tight text-[13px]">{r.name}</td>
                       <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{Number(r.qty30||0).toLocaleString()}</td>
                       <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{Number(r.qty100||0).toLocaleString()}</td>
-                      <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{fmtRevenue(r.revenue)}</td>
+                      {showRevenue && (
+                        <td className="py-5 tabular-nums text-center tracking-tight text-[13px]">{fmtRevenue(r.revenue)}</td>
+                      )}
                       <td className="py-5 tabular-nums text-right pr-8 tracking-tight text-[13px]">{fmtPct(r.sharePct)}</td>
                       <td className={`py-5 tabular-nums text-right pr-8 tracking-tight text-[13px] ${Number(r.deltaSharePct||0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{fmtPct(r.deltaSharePct)}</td>
                     </tr>
@@ -241,7 +264,7 @@ export default function TiersDashboard() {
   )
 }
 
-function SettingsInline() {
+function SettingsInline({ showRevenue, setShowRevenue }: { showRevenue: boolean, setShowRevenue: (v: boolean)=>void }) {
   const [open, setOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const btnRef = React.useRef<HTMLButtonElement | null>(null)
@@ -304,6 +327,15 @@ function SettingsInline() {
               </Button>
             ))}
           </div>
+          {((import.meta as any).env?.VITE_TIERS_ADMIN_COLUMNS === '1') && (
+            <div className="mt-3 border-t pt-3">
+              <div className="text-xs text-gray-500 mb-2">Columnas</div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showRevenue} onChange={(e)=> setShowRevenue(e.target.checked)} />
+                Mostrar NET SALES
+              </label>
+            </div>
+          )}
           {saving && <div className="text-xs text-gray-500 mt-2">Guardando…</div>}
         </div>
       )}

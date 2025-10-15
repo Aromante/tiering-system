@@ -34,3 +34,10 @@ Windows
 
 Build
 - `npm run build` genera `dist/`.
+
+Administración de columnas (ocultas por defecto)
+- La columna “NET SALES” está oculta por defecto.
+- Existe un toggle administrativo en el menú de ajustes para mostrar/ocultarla, pero permanece oculto salvo que se habilite explícitamente vía env:
+  - `VITE_TIERS_ADMIN_COLUMNS=1` (Vite/Pages) → muestra la sección “Columnas” con el checkbox “Mostrar NET SALES”.
+- Persistencia local: el estado del toggle se recuerda por navegador (`localStorage` → `tiers-cols-v1`).
+- Para un control global en el futuro, se puede persistir en Supabase (tabla de settings + RPC SECURITY DEFINER).
