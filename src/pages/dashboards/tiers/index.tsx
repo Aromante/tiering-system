@@ -1,5 +1,5 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 // Card UI removido al quitar comparativa
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { normalizeText } from '@/lib/utils'
 import { BarChart3, ChevronUp, ChevronDown, Settings as SettingsIcon } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import Spinner from '@/components/ui/spinner'
 
 export default function TiersDashboard() {
@@ -20,6 +21,8 @@ export default function TiersDashboard() {
   const [sort, setSort] = React.useState<{ key: 'rank'|'tier'|'name'|'qty30'|'qty100'|'revenue'|'sharePct'|'deltaSharePct', dir: 'asc'|'desc' }>({ key: 'revenue', dir: 'desc' })
   // Visibilidad de columnas (persistencia local por ahora)
   const [showRevenue, setShowRevenue] = React.useState<boolean>(false)
+  // Mobile: tarjetas expandibles por SKU
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
   React.useEffect(() => {
     try {
       const raw = localStorage.getItem('tiers-cols-v1')
@@ -102,9 +105,14 @@ export default function TiersDashboard() {
   }
   function applySort(rows: any[]) {
     const k = sort.key; const dir = sort.dir === 'asc' ? 1 : -1
+    const tierRank = (t: any) => {
+      const map: Record<string, number> = { SS: 1, S: 2, A: 3, B: 4, C: 5, T: 6 }
+      const key = String(t || '').toUpperCase()
+      return map[key] ?? 9999
+    }
     const getter = (r:any) => (
       k === 'rank' ? ((r.productId && baseRankByShare[r.productId]) || r.rank || 999999) :
-      k === 'tier' ? String(r.tier || '') :
+      k === 'tier' ? tierRank(r.tier) :
       k === 'name' ? String(r.name || '') :
       Number(r[k] || 0)
     )
@@ -118,10 +126,22 @@ export default function TiersDashboard() {
   const fmtRevenue = (n: any) => `$${Number(n||0).toLocaleString('en-US', { maximumFractionDigits: 0, minimumFractionDigits: 0 })}`
   const fmtPct = (n: any) => `${Number(n||0).toFixed(1)}%`
 
+  // Mobile sorting helpers
+  const sortLabels: Record<typeof sort.key, string> = {
+    rank: 'Ranking',
+    tier: 'Tier',
+    name: 'Producto',
+    qty30: '30ML',
+    qty100: '100ML',
+    revenue: 'Net Sales',
+    sharePct: '% Participación',
+    deltaSharePct: 'Delta %',
+  }
+
   // carga comparativa removida
 
   return (
-    <main className="container max-w-6xl py-8 space-y-6">
+    <main className="container max-w-6xl py-6 md:py-8 space-y-4 md:space-y-6">
       <header className="flex items-center justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><BarChart3 className="h-5 w-5 text-blue-600" /> Tiers — Resumen</h1>
@@ -131,14 +151,14 @@ export default function TiersDashboard() {
       </header>
 
       {/* Búsqueda + botón de filtros (bajo el título, sobre la tabla) */}
-      <div className="flex items-center gap-3 py-3">
-        <div className="flex items-center gap-2 h-12 px-5 rounded-full bg-white border soft-hover w-[300px]">
+      <div className="flex flex-col md:flex-row md:items-center gap-3 py-3">
+        <div className="flex items-center gap-2 h-11 md:h-12 px-4 md:px-5 rounded-full bg-white border soft-hover w-full md:w-[300px]">
           <input value={search} onChange={e=> setSearch(e.target.value)} placeholder="Buscar producto…" className="outline-none bg-transparent text-sm w-full" />
         </div>
-        <div className="ml-auto flex items-center gap-6">
+        <div className="md:ml-auto flex flex-wrap items-center gap-3 md:gap-6">
           <ToggleGroup type="single" value={channel} onValueChange={(v)=> setChannel(prev => prev === v ? 'TOTAL' : (v as any))}>
-            <ToggleGroupItem value="ONLINE" aria-label="ONLINE">ONLINE</ToggleGroupItem>
-            <ToggleGroupItem value="POS" aria-label="POS">POS</ToggleGroupItem>
+            <ToggleGroupItem value="ONLINE" aria-label="ONLINE" className="h-10 px-3 md:h-12 md:px-4">ONLINE</ToggleGroupItem>
+            <ToggleGroupItem value="POS" aria-label="POS" className="h-10 px-3 md:h-12 md:px-4">POS</ToggleGroupItem>
           </ToggleGroup>
           <ToggleGroup type="multiple" value={tiers} onValueChange={(v)=> setTiers(v as string[])} className="flex flex-wrap">
             {ALL_TIERS.map(t => (
@@ -146,7 +166,7 @@ export default function TiersDashboard() {
                 key={t}
                 value={t}
                 aria-label={t}
-                className="w-12 h-12 px-0 flex items-center justify-center"
+                className="w-10 h-10 md:w-12 md:h-12 px-0 flex items-center justify-center"
               >
                 {t}
               </ToggleGroupItem>
@@ -167,8 +187,126 @@ export default function TiersDashboard() {
         {baseQuery.isLoading && <Spinner label="Cargando…" />}
         {baseQuery.error && <p className="text-sm text-red-600">{(baseQuery.error as any).message}</p>}
         {baseQuery.data && (
-          <div className="overflow-x-auto rounded-xl">
-            <table className="w-full text-sm table-modern">
+          <>
+            {/* Mobile sorting controls */}
+            <div className="md:hidden mb-2 flex items-center justify-between">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button data-size="sm" data-variant="outline" className="gap-2">
+                    Ordenar: <span className="font-medium">{sortLabels[sort.key]}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[220px] p-2">
+                  <div className="text-xs text-gray-500 mb-2">Ordenar por</div>
+                  <div className="grid grid-cols-1 gap-1">
+                    {Object.entries(sortLabels).map(([k, label]) => (
+                      <Button key={k} data-size="sm" data-variant={(sort.key === (k as any)) ? 'default' : 'outline'} className="justify-start"
+                        onClick={()=> setSort(prev => ({ ...prev, key: k as any }))}
+                      >{label}</Button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <Button data-size="sm" data-variant="outline" onClick={()=> setSort(prev => ({ ...prev, dir: prev.dir === 'asc' ? 'desc' : 'asc' }))}>
+                {sort.dir === 'asc' ? 'Ascendente' : 'Descendente'}
+              </Button>
+            </div>
+
+            {/* Mobile cards (no scroll horizontal) */}
+            <div className="md:hidden space-y-3">
+              {(() => {
+                const totalRows = (baseQuery.data?.rows || [])
+                const isOpen = (id: string) => expanded.has(id)
+                const toggle = (id: string) => setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+                if (channel === 'TOTAL') {
+                  const filtered = applySort(totalRows
+                    .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
+                    .filter((r:any)=> !search || normalizeText(String(r.name||'')).includes(normalizeText(search)))
+                  )
+                  if (filtered.length === 0) return (<div className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</div>)
+                  return filtered.map((r:any, i:number) => (
+                    <div key={i} className="rounded-xl border bg-white p-3 shadow-sm">
+                      <button onClick={()=> toggle(r.productId)} className="w-full flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-gray-100 grid place-items-center text-[12px] tabular-nums">{(r.productId && baseRankByShare[r.productId]) || r.rank || i+1}</div>
+                          <div className="font-medium text-sm leading-snug text-left">{r.name}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {r.tier ? <Badge className="px-2.5 py-0.5 text-xs" data-variant={r.tier==='SS'?'blue': r.tier==='S'?'green': r.tier==='A'?'amber': r.tier==='B'?'orange': r.tier==='C'?'red':'gray'}>{r.tier}</Badge> : null}
+                          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen(r.productId) ? 'rotate-180' : ''}`} />
+                        </div>
+                      </button>
+                      {isOpen(r.productId) && (
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
+                          <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">30ML</div><div className="tabular-nums">{Number(r.qty30||0).toLocaleString()}</div></div>
+                          <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">100ML</div><div className="tabular-nums">{Number(r.qty100||0).toLocaleString()}</div></div>
+                          {showRevenue && (
+                            <div className="rounded-lg bg-gray-50 p-2 col-span-2"><div className="text-xs text-gray-500">NET SALES</div><div className="tabular-nums">{fmtRevenue(r.revenue)}</div></div>
+                          )}
+                          <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">% PARTIC.</div><div className="tabular-nums">{fmtPct(r.sharePct)}</div></div>
+                          <div className={`rounded-lg bg-gray-50 p-2 ${Number(r.deltaSharePct||0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}><div className="text-xs text-gray-500">DELTA</div><div className="tabular-nums">{fmtPct(r.deltaSharePct)}</div></div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                }
+                const ch = channel
+                if (chQuery.isLoading) return (<div className="py-8 text-center"><Spinner label="Cargando canal…" /></div>)
+                let list:any[] = []
+                if (chQuery.data?.rows) list = chQuery.data.rows
+                const tierById: Record<string,string> = {}
+                for (const r of totalRows) if (r?.productId) tierById[r.productId] = r.tier
+                const sumRev = list.reduce((a,b)=> a + Number(b.revenue||0), 0) || 1
+                const rows = list.map((r:any)=> ({
+                  productId: r.productId,
+                  name: r.name,
+                  qty30: r.qty30||0,
+                  qty100: r.qty100||0,
+                  revenue: Number(r.revenue||0),
+                  totalSales: 0,
+                  sharePct: Number.isFinite(Number(r.sharePct)) ? Number(r.sharePct) : (Number(r.revenue||0)*100)/sumRev,
+                  deltaSharePct: 0,
+                  tier: r.tier || tierById[r.productId] || 'C',
+                }))
+                const filtered = applySort(rows
+                  .filter((r:any)=> tiers.length === 0 || tiers.includes(String(r.tier||'')))
+                  .filter((r:any)=> !search || normalizeText(String(r.name||'')).includes(normalizeText(search)))
+                )
+                if (filtered.length === 0) return (<div className="py-10 text-center text-sm text-gray-500">NO EXISTE NINGÚN PRODUCTO DE ESTE TIER</div>)
+                const sorted = rows.slice().sort((a,b)=> Number(b.sharePct)-Number(a.sharePct))
+                const rankMap: Record<string, number> = {}
+                sorted.forEach((r:any, idx:number)=> { if (r.productId) rankMap[r.productId] = idx+1 })
+                return filtered.map((r:any, i:number) => (
+                  <div key={i} className="rounded-xl border bg-white p-3 shadow-sm">
+                    <button onClick={()=> toggle(r.productId)} className="w-full flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-full bg-gray-100 grid place-items-center text-[12px] tabular-nums">{(r.productId && rankMap[r.productId]) || i+1}</div>
+                        <div className="font-medium text-sm leading-snug text-left">{r.name}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {r.tier ? <Badge className="px-2.5 py-0.5 text-xs" data-variant={r.tier==='SS'?'blue': r.tier==='S'?'green': r.tier==='A'?'amber': r.tier==='B'?'orange': r.tier==='C'?'red':'gray'}>{r.tier}</Badge> : null}
+                        <ChevronDown className={`h-4 w-4 transition-transform ${isOpen(r.productId) ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+                    {isOpen(r.productId) && (
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
+                        <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">30ML</div><div className="tabular-nums">{Number(r.qty30||0).toLocaleString()}</div></div>
+                        <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">100ML</div><div className="tabular-nums">{Number(r.qty100||0).toLocaleString()}</div></div>
+                        {showRevenue && (
+                          <div className="rounded-lg bg-gray-50 p-2 col-span-2"><div className="text-xs text-gray-500">NET SALES</div><div className="tabular-nums">{fmtRevenue(r.revenue)}</div></div>
+                        )}
+                        <div className="rounded-lg bg-gray-50 p-2"><div className="text-xs text-gray-500">% PARTIC.</div><div className="tabular-nums">{fmtPct(r.sharePct)}</div></div>
+                        <div className={`rounded-lg bg-gray-50 p-2 ${Number(r.deltaSharePct||0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}><div className="text-xs text-gray-500">DELTA</div><div className="tabular-nums">{fmtPct(r.deltaSharePct)}</div></div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              })()}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto rounded-xl">
+              <table className="w-full text-sm table-modern">
               <thead className="bg-gray-100">
                 <tr className="text-left text-gray-700">
                   <th className="py-4 px-3 first:rounded-l-xl last:rounded-r-xl"><button className="w-full flex items-center justify-center gap-1" onClick={()=> toggleSort('rank')}>RANGO {sortIcon('rank')}</button></th>
@@ -256,6 +394,7 @@ export default function TiersDashboard() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
 
@@ -268,6 +407,7 @@ function SettingsInline({ showRevenue, setShowRevenue }: { showRevenue: boolean,
   const [open, setOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const btnRef = React.useRef<HTMLButtonElement | null>(null)
+  const queryClient = useQueryClient()
 
   const settingsQuery = useQuery({
     queryKey: ['forecasting_settings'],
@@ -289,6 +429,15 @@ function SettingsInline({ showRevenue, setShowRevenue }: { showRevenue: boolean,
       const { error } = await supabase.rpc('set_tier_weeks', { new_tier: w })
       if (error) throw error
       await settingsQuery.refetch()
+      // Refrescar datos del dashboard de inmediato
+      await Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: ['tiersSummary'] }),
+        queryClient.invalidateQueries({ queryKey: ['tiersSummaryCh'] }),
+      ])
+      await Promise.allSettled([
+        queryClient.refetchQueries({ queryKey: ['tiersSummary'], type: 'active' }),
+        queryClient.refetchQueries({ queryKey: ['tiersSummaryCh'], type: 'active' }),
+      ])
       setOpen(false)
     } catch (e) {
       alert((e as any)?.message || 'No se pudo guardar')
